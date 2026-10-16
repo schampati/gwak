@@ -7,9 +7,10 @@ class ModelCheckpoint(pl.callbacks.ModelCheckpoint):
     def on_train_end(self, trainer, pl_module):
         torch.cuda.empty_cache()
 
+        init_args = pl_module.hparams.get("init_args", pl_module.hparams)
         module = pl_module.__class__.load_from_checkpoint(
             self.best_model_path,
-            **pl_module.hparams
+            **init_args
         )
 
         module.model.eval()

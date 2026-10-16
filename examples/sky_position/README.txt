@@ -205,3 +205,66 @@ https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.show.html
 Edit the RA, Dec and UTC time inside run_example. Both conversions run and are
 compared with a shared UT1-UTC input; position and antenna windows are unsaved.
 Use run_example(temp_plot=False) when calling from a headless environment.
+
+10. Launch GWAK encoder training using event coordinates
+
+Run these commands from the checkout inside the configured GWAK training
+runtime (for example, inside your Apptainer container). The lightweight plotting
+requirements alone do not install the training dependencies. The H1/L1 background
+files and a compatible allocated CUDA GPU must be accessible in that runtime.
+Set CUDA_VISIBLE_DEVICES in the job environment to the allocated GPU if needed;
+the launcher leaves that selection unchanged.
+
+Edit data.init_args in sg150_icecube_event.json to select the source:
+    event_ra_deg: 138.47
+    event_dec_deg: -1.94
+    event_time_utc: "2011-05-14T01:32:22.654109"
+    sky_window_deg: 1.0
+
+The real SignalDataloader performs the conversion and samples this fixed
+Earth-relative box. The launcher does not supply a separate sampler or recompute
+the direction from noise timestamps. The rest of this example uses SG150/Q9
+signals plus background, uniform injection SNR 4-30, and no SNR curriculum.
+
+Preview the command without importing the training stack, writing files, or
+starting training (replace the placeholder paths when actually running):
+
+    bash examples/sky_position/train_event.sh \
+      /path/to/HL /path/to/new-smoke-output smoke --dry-run
+
+Run the default short smoke test:
+
+    bash examples/sky_position/train_event.sh \
+      /path/to/HL /path/to/new-smoke-output
+
+This runs one encoder epoch with two training and two validation batches,
+batch size 8. It exercises the normal logger/checkpoint/export hooks; it is not
+a scientifically trained model. A zero exit status indicates the CLI completed.
+
+Full encoder training with the same event inputs:
+
+    bash examples/sky_position/train_event.sh \
+      /path/to/HL /path/to/new-training-output train
+
+Full mode uses 25 epochs, 640 training batches per epoch, batch size 32, and
+10 validation batches per epoch. Both modes use num_workers=0 to avoid the
+multiprocess data-loading stalls seen in earlier studies, and offline W&B logs
+because the model logs validation images through W&B. Thread pool defaults are
+limited to one; environment overrides are honored. Set GWAK_PYTHON to a Python
+executable path if it is not named python.
+
+Use a new output directory for each run. GWAK writes its resolved config,
+logs, checkpoints and model_JIT.pt under the output tree. Console output stays
+in your terminal/job log. This example launches only the contrastive encoder;
+embedding extraction, fitting the normalizing flow, false-positive calibration
+and efficiency evaluation are separate stages.
+
+The current checkpoint export callback accepts both flat hyperparameters and
+LightningCLI's nested init_args form. That existing compatibility fix is included
+with the launch example so export can reload the trained encoder correctly.
+
+For Condor, Andy can invoke this command after shipping the checkout, environment
+and background files. No particular home mount, server name, container image,
+GPU UUID, scheduler allocation or SSH session is assumed by this launcher.
+Validation of the launcher covers shell syntax and command construction; a real
+GPU/data smoke run must still be performed in the target training environment.
