@@ -7,6 +7,8 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.12"
+# Event RA/Dec/UTC -> fixed Earth-relative GWAK angles
+astropy = ">=6.0,<7.0"
 # local deps
 ml4gw = {path = "./ml4gw", develop = true}
 

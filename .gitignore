@@ -171,3 +171,11 @@ cython_debug/
 lightning_logs/
 wandb/
 slurm_logs/
+
+# Local sky-update backups and generated installer payload
+.sky-position-backups/
+sky-position-backup-*/
+sky-position-preflight-*/
+payload_manifest.json
+scripts/install_sky_position.sh
+.venv-sky/

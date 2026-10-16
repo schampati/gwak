@@ -1,0 +1,4 @@
+# Standalone event conversion/plotting; no GWAK training stack or GPU required.
+astropy>=6.0,<7.0
+numpy>=1.23,<2.0
+matplotlib>=3.7,<4.0

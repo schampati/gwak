@@ -26,6 +26,7 @@ from ml4gw.distributions import Cosine, PowerLaw, LogNormal, LogUniform
 from ml4gw.waveforms import GenerateString
 from gwak import data
 from gwak.data.prior import FakeGlitchPrior
+from gwak.sky_position import SkyPositionMixin, resolve_sky_position
 from abc import ABC
 import copy
 import sys
@@ -661,7 +662,7 @@ class GwakBaseDataloader(pl.LightningDataModule):
         pass
 
 
-class SignalDataloader(GwakBaseDataloader):
+class SignalDataloader(SkyPositionMixin, GwakBaseDataloader):
     def __init__(
         self,
         signal_classes, # string names of signal class(es) desired
@@ -679,9 +680,25 @@ class SignalDataloader(GwakBaseDataloader):
         snr_anneal_epochs: float = 10, # number of epochs to anneal SNR over
         rebalance_classes: bool = True, # whether to rebalance the classes (e.g. waveforms with same label but different names)
         whiten: bool = True,   # make whitening optional
+        # Canonical Earth-relative angles are radians; event coordinates are degrees.
+        fixed_phi_rad: Optional[float] = None,
+        fixed_declination_rad: Optional[float] = None,
+        event_ra_deg: Optional[float] = None,
+        event_dec_deg: Optional[float] = None,
+        event_time_utc: Optional[str] = None,
+        sky_window_deg: float = 1.0,  # full box width: +/-0.5 deg by default
+        fixed_ra: Optional[float] = None,  # deprecated Earth-phi alias, NOT celestial RA
+        fixed_dec: Optional[float] = None,  # deprecated Earth-declination alias
         **kwargs
     ):
+        # Resolve once at initialization, before data/GPU access; never use noise times.
+        self.configure_sky_position(
+            fixed_phi_rad=fixed_phi_rad, fixed_declination_rad=fixed_declination_rad,
+            event_ra_deg=event_ra_deg, event_dec_deg=event_dec_deg,
+            event_time_utc=event_time_utc, sky_window_deg=sky_window_deg,
+            fixed_ra=fixed_ra, fixed_dec=fixed_dec)
         super().__init__(*args, **kwargs)
+
         self.signal_classes = signal_classes if type(signal_classes) == list else [signal_classes]
         self.num_classes = len(signal_classes)
         self.waveforms = waveforms if type(waveforms) == list else [waveforms]
@@ -695,6 +712,7 @@ class SignalDataloader(GwakBaseDataloader):
         self.cache_dir = cache_dir
         self.rebalance_classes = rebalance_classes
         self.do_whiten = whiten
+        # Fixed coordinates/window were resolved by configure_sky_position above.
 
         self.all_signal_labels = {
             "SineGaussian":1,
@@ -734,20 +752,24 @@ class SignalDataloader(GwakBaseDataloader):
         self.dec_prior = Cosine(-np.pi/2, torch.pi/2)
         self.phic_prior = Uniform(0, 2 * torch.pi)
 
-        # CCSN second-derivitive waveform data if using
-        file_path = Path(__file__).resolve()
-        self.ccsn_dict = load_h5_as_dict(
-            chosen_signals=file_path.parents[1] / "data/configs/ccsn.yaml",
-            source_file=Path(file_path.parents[2] / "gwak-dlc/Resampled/")
-        )
-        self.generate_waveforms_ccsn = CCSN_Injector(
-            ifos=self.ifos,
-            signals_dict=self.ccsn_dict,
-            sample_rate=self.sample_rate,
-            sample_duration=0.8,
-            buffer_duration=self.kernel_length + self.fduration,
-            time_shift=-0.25
-        )
+        # CCSN waveforms live in the optional gwak-dlc checkout. Avoid requiring
+        # that large dataset for experiments which do not train on CCSNe.
+        self.ccsn_dict = None
+        self.generate_waveforms_ccsn = None
+        if "CCSN" in self.signal_classes:
+            file_path = Path(__file__).resolve()
+            self.ccsn_dict = load_h5_as_dict(
+                chosen_signals=file_path.parents[1] / "data/configs/ccsn.yaml",
+                source_file=Path(file_path.parents[2] / "gwak-dlc/Resampled/")
+            )
+            self.generate_waveforms_ccsn = CCSN_Injector(
+                ifos=self.ifos,
+                signals_dict=self.ccsn_dict,
+                sample_rate=self.sample_rate,
+                sample_duration=0.8,
+                buffer_duration=self.kernel_length + self.fduration,
+                time_shift=-0.25
+            )
 
         # compute number of events to generate per class per batch
         self.num_per_class = self.num_classes * [self.batch_size//self.num_classes]
@@ -808,6 +830,10 @@ class SignalDataloader(GwakBaseDataloader):
         self.bandpass = bandpass.to('cuda') if torch.cuda.is_available() else bandpass
         self.whitener = whitener.to('cuda') if torch.cuda.is_available() else whitener
         self.rescaler = rescaler.to('cuda') if torch.cuda.is_available() else rescaler
+
+    def sample_sky_location(self, batch_size):
+        """Return Earth-relative (phi, declination) in radians, not celestial RA."""
+        return self._sample_sky_location(batch_size)
 
     def get_snr_factor(self,current_epoch):
         f = (1.0/self.snr_init_factor)**(1.0/self.snr_anneal_epochs)
@@ -918,9 +944,14 @@ class SignalDataloader(GwakBaseDataloader):
                     dec=decs[i] if decs is not None else None
                 )
             elif signal_class == "CCSN":
-                responses, dec, phic, hrss_raw = self.generate_waveforms_ccsn(
-                    total_counts=self.num_per_class[i]
-                )
+                ccsn_kwargs = {"total_counts": self.num_per_class[i]}
+                if self.fixed_phi_rad is not None:
+                    ccsn_kwargs.update(
+                        fixed_phi_rad=self.fixed_phi_rad,
+                        fixed_declination_rad=self.fixed_declination_rad,
+                        sky_window_deg=self.sky_window_deg
+                    )
+                responses, dec, phic, hrss_raw = self.generate_waveforms_ccsn(**ccsn_kwargs)
                 params, ra = None, None
             elif signal_class in ["Background", "Glitch"]:
                 responses, params, ra, dec, phic = None, None, None, None, None
@@ -1260,8 +1291,7 @@ class AugmentationSignalDataloader(SignalDataloader):
             # resample various parameters depending on augmentation settings
             if self.sky_location_augmentation:
                 for i in range(self.num_classes):
-                    ras[i] = self.ra_prior.sample((self.num_per_class[i],))
-                    decs[i] = self.dec_prior.sample((self.num_per_class[i],))
+                    ras[i], decs[i] = self.sample_sky_location(self.num_per_class[i])
             if self.distance_augmentation:
                 for i in range(self.num_classes):
                     params[i]['distance'] = self.priors[i].sample(self.num_per_class[i])['distance']
@@ -1322,10 +1352,10 @@ def generate_waveforms_standard(
     # sample from prior and generate waveforms
     if parameters is None:
         parameters = prior.sample(batch_size) # dict[str, torch.tensor]
+    if (ra is None) != (dec is None):
+        raise ValueError("ra and dec must either both be provided or both be None")
     if ra is None:
-        ra = loader.ra_prior.sample((batch_size,))
-    if dec is None:
-        dec = loader.dec_prior.sample((batch_size,))
+        ra, dec = loader.sample_sky_location(batch_size)
     phic = loader.phic_prior.sample((batch_size,))
 
     cross, plus = waveform(**parameters)
@@ -1363,10 +1393,10 @@ def generate_waveforms_bbh(
     if parameters is None:
         # sample from prior and generate waveforms
         parameters = prior.sample(batch_size) # dict[str, torch.tensor]
+    if (ra is None) != (dec is None):
+        raise ValueError("ra and dec must either both be provided or both be None")
     if ra is None:
-        ra = loader.ra_prior.sample((batch_size,))
-    if dec is None:
-        dec = loader.dec_prior.sample((batch_size,))
+        ra, dec = loader.sample_sky_location(batch_size)
 
     cross, plus = waveform(**parameters)
     cross, plus = torch.fft.irfft(cross), torch.fft.irfft(plus)
@@ -1525,8 +1555,21 @@ class CCSN_Injector:
 
     def __call__(
         self,
-        total_counts # batch_size
+        total_counts, # batch_size
+        fixed_ra=None,
+        fixed_dec=None,
+        sky_window_deg=1.0,
+        *,
+        fixed_phi_rad=None,
+        fixed_declination_rad=None,
     ):
+        sky = resolve_sky_position(
+            fixed_phi_rad=fixed_phi_rad, fixed_declination_rad=fixed_declination_rad,
+            fixed_ra=fixed_ra, fixed_dec=fixed_dec, sky_window_deg=sky_window_deg
+        )['gwak_sampling']
+        fixed_phi_rad = sky['fixed_phi_rad']
+        fixed_declination_rad = sky['fixed_declination_rad']
+        sky_window_deg = sky['sky_window_deg']
 
         ccsn_num = len(self.ccsn_list)
         ccsn_sample = np.random.choice(ccsn_num, total_counts)
@@ -1565,11 +1608,15 @@ class CCSN_Injector:
         # X = X[:, :, 2048:-2048]
         dec_distro = Cosine()
         psi_distro = Uniform(0, np.pi)
-        phi_distro = Uniform(0, 2 * np.pi)
 
-        dec = dec_distro.rsample(total_counts)
         psi = psi_distro.sample((total_counts,))
-        phi = phi_distro.sample((total_counts,))
+        if fixed_phi_rad is None:
+            dec = dec_distro.rsample(total_counts)
+            phi = Uniform(0, 2 * np.pi).sample((total_counts,))
+        else:
+            window = np.deg2rad(sky_window_deg)
+            dec = fixed_declination_rad + (torch.rand(total_counts) - 0.5) * window
+            phi = (fixed_phi_rad + (torch.rand(total_counts) - 0.5) * window) % (2 * torch.pi)
 
         ht = gw.compute_observed_strain(
             dec,
