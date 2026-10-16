@@ -20,7 +20,7 @@ Review these files first:
   examples/sky_position/train_event.sh
     Launches the GWAK training CLI with the event inputs below. Default mode is
     a short encoder smoke run; train mode uses 25 epochs. See the example README.
-  examples/sky_position/sg150_icecube_event.json
+  examples/sky_position/sg150_directional_event.json
     SG150/Q9 example; uses gwak/data/fixed_sine_gaussian.py, with no dependency
     on the untracked experiment drivers. Training requires the GWAK runtime,
     data location and GPU. This is an example, not a new trained result.

@@ -30,7 +30,7 @@ export MKL_NUM_THREADS="${MKL_NUM_THREADS:-1}"
 export OPENBLAS_NUM_THREADS="${OPENBLAS_NUM_THREADS:-1}"
 export NUMEXPR_NUM_THREADS="${NUMEXPR_NUM_THREADS:-1}"
 cmd=("${GWAK_PYTHON:-python}" "$repo_root/gwak/train/cli.py" fit
-     --config "$repo_root/examples/sky_position/sg150_icecube_event.json"
+     --config "$repo_root/examples/sky_position/sg150_directional_event.json"
      --data.init_args.data_dir "$data_dir"
      --data.init_args.num_workers 0
      --trainer.default_root_dir "$output_dir"

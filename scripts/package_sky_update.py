@@ -10,7 +10,7 @@ root=Path(__file__).resolve().parents[1]
 files=['gwak/sky_position_antenna_patterns_math.pdf','scripts/build_sky_antenna_math_pdf.py','gwak/sky_position.py','gwak/sky_position_antenna_patterns.py','gwak/sky_position_first_principles.py','scripts/patch_sky_sampler.py','scripts/install_sky_position.py',
        'scripts/verify_sky_position.py','scripts/requirements-sky.txt']
 files += ['gwak/data/fixed_sine_gaussian.py']
-files += ['examples/sky_position/README.txt', 'examples/sky_position/icecube_event.csv', 'examples/sky_position/sg150_icecube_event.json', 'examples/sky_position/IC110514A.png', 'examples/sky_position/IC110514A.pdf', 'examples/sky_position/IC110514A_antenna.png', 'examples/sky_position/IC110514A_antenna.pdf', 'examples/sky_position/run_example.py', 'examples/sky_position/train_event.sh']
+files += ['examples/sky_position/README.txt', 'examples/sky_position/icecube_event.csv', 'examples/sky_position/sg150_directional_event.json', 'examples/sky_position/IC110514A.png', 'examples/sky_position/IC110514A.pdf', 'examples/sky_position/IC110514A_antenna.png', 'examples/sky_position/IC110514A_antenna.pdf', 'examples/sky_position/run_example.py', 'examples/sky_position/train_event.sh']
 manifest={rel:hashlib.sha256((root/rel).read_bytes()).hexdigest() for rel in files}
 (root/'payload_manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
 buf=io.BytesIO()

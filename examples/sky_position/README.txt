@@ -34,7 +34,7 @@ work. Old study configurations and trained models are not rewritten.
 
 This interface applies to SignalDataloader. Archived custom multi-target
 subclasses override sky sampling; their frozen target lists remain their inputs.
-The example sg150_icecube_event.json is a full SG150/Q9 configuration with the
+The example sg150_directional_event.json is a full SG150/Q9 configuration with the
 new event fields and the packaged gwak.data.fixed_sine_gaussian prior. It requires the
 usual GWAK runtime/data paths. No training has been launched for this event.
 
@@ -215,7 +215,7 @@ files and a compatible allocated CUDA GPU must be accessible in that runtime.
 Set CUDA_VISIBLE_DEVICES in the job environment to the allocated GPU if needed;
 the launcher leaves that selection unchanged.
 
-Edit data.init_args in sg150_icecube_event.json to select the source:
+Edit data.init_args in sg150_directional_event.json to select the source:
     event_ra_deg: 138.47
     event_dec_deg: -1.94
     event_time_utc: "2011-05-14T01:32:22.654109"
